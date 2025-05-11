@@ -19,6 +19,7 @@ We’ll use AWS CloudFormation to spin up a VPS that includes Docker and a chose
 > 📄 Templates provided:
 - `vps_ec2_base_docker.yaml`: A clean VPS with Docker pre-installed
 - `vps_ec2_authelia.yaml`: Authelia auth server with Docker and TLS setup
+- `vps_ec2_authentik.yaml`: Authentik auth server with Docker and TLS setup
 
 ---
 
