@@ -1,0 +1,340 @@
+Resources:
+  AuthVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: auth
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref AuthVPC
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: auth-public-1
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref AuthVPC
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: 10.0.2.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: auth-public-2
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref AuthVPC
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: 10.0.3.0/24
+      Tags:
+        - Key: Name
+          Value: auth-private-1
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref AuthVPC
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: 10.0.4.0/24
+      Tags:
+        - Key: Name
+          Value: auth-private-2
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: auth-igw
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref AuthVPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref AuthVPC
+      Tags:
+        - Key: Name
+          Value: auth-public-rt
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  S3Endpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.s3
+      VpcId: !Ref AuthVPC
+      RouteTableIds:
+        - !Ref PublicRouteTable
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action: "*"
+            Resource: "*"
+
+  VPSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for VPS EC2 instance
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0  # For SSH access (restrict this to your IP)
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0  # For HTTP access
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0  # For HTTPS access
+
+  VPSInstance:
+    Type: "AWS::EC2::Instance"
+    Properties:
+      ImageId: "ami-0df368112825f8d8f" # Replace with your Ubuntu AMI
+      InstanceType: "t3.small"
+      KeyName: "VPS" # Name of your existing key pair
+      SecurityGroupIds:
+        - !Ref VPSSecurityGroup
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash -xe
+          
+          # Log all output to a file for debugging
+          exec > >(tee /var/log/user-data.log) 2>&1
+          
+          echo "Starting user data script execution at $(date)"
+          
+          # Try to wait for cloud-init with a timeout
+          timeout 60 cloud-init status --wait || echo "Cloud-init wait timed out after 60 seconds, continuing anyway"
+          
+          # Sleep a bit to give system time to settle
+          sleep 30
+          
+          echo "Proceeding with Docker installation at $(date)"
+          
+          # Update package lists
+          apt-get update
+          
+          # Install prerequisites
+          apt-get install -y ca-certificates curl gnupg
+          
+          # Set up Docker repository
+          install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+          chmod a+r /etc/apt/keyrings/docker.asc
+          
+          # Add Docker repository
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+          
+          # Update package lists again with Docker repository
+          apt-get update
+          
+          # Install Docker
+          apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+          
+          # Add the default user to the docker group
+          usermod -aG docker ubuntu
+          
+          # Enable Docker service
+          systemctl enable docker.service
+          systemctl enable containerd.service
+          systemctl start docker.service
+          
+          echo "Docker installation completed successfully at $(date)!"
+          
+          # Ensure openssl is installed
+          if ! command -v openssl &> /dev/null; then
+              echo "openssl not found, installing..."
+              apt-get install -y openssl
+          fi
+          
+          # Generate random passwords
+          POSTGRES_PASSWORD=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
+          AUTHENTIK_SECRET_KEY=$(openssl rand -base64 64 | tr -dc 'a-zA-Z0-9' | fold -w 64 | head -n 1)
+          
+          # Create .env file
+          cat > /home/ubuntu/.env << EOF
+          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          POSTGRES_USER=admin
+          POSTGRES_DB=authentik-db
+          AUTHENTIK_SECRET_KEY=${AUTHENTIK_SECRET_KEY}
+          AUTHENTIK_ERROR_REPORTING__ENABLED=true
+          AUTHENTIK_POSTGRESQL__USER=admin 
+          AUTHENTIK_POSTGRESQL__NAME=authentik-db
+          AUTHENTIK_POSTGRESQL__PASSWORD=${POSTGRES_PASSWORD}
+          COMPOSE_PORT_HTTP=80
+          COMPOSE_PORT_HTTPS=443
+          EOF
+          
+          # Set proper ownership
+          chown ubuntu:ubuntu /home/ubuntu/.env
+          chmod 600 /home/ubuntu/.env
+          
+          echo ".env file created successfully at $(date)!"
+          
+          # Create docker-compose.yml file
+          cat > /home/ubuntu/docker-compose.yml << 'EOF'
+          services:
+            postgresql:
+              image: docker.io/library/postgres:16-alpine
+              container_name: authentik-postgresql
+              restart: unless-stopped
+              healthcheck:
+                test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
+                start_period: 20s
+                interval: 30s
+                retries: 5
+                timeout: 5s
+              volumes:
+                - database:/var/lib/postgresql/data
+              env_file:
+                - .env
+              environment:
+                - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+                - POSTGRES_USER=${POSTGRES_USER}
+                - POSTGRES_DB=${POSTGRES_DB}
+            redis:
+              image: docker.io/library/redis:alpine
+              container_name: authentik-redis
+              command: --save 60 1 --loglevel warning
+              restart: unless-stopped
+              healthcheck:
+                test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
+                start_period: 20s
+                interval: 30s
+                retries: 5
+                timeout: 3s
+              volumes:
+                - redis:/data
+            server:
+              image: ghcr.io/goauthentik/server:2024.2.2
+              container_name: authentik-server
+              restart: unless-stopped
+              command: server
+              env_file:
+                - .env
+              environment:
+                - AUTHENTIK_SECRET_KEY=${AUTHENTIK_SECRET_KEY}
+                - AUTHENTIK_REDIS__HOST=redis
+                - AUTHENTIK_POSTGRESQL__HOST=postgresql
+                - AUTHENTIK_POSTGRESQL__USER=${AUTHENTIK_POSTGRESQL__USER}
+                - AUTHENTIK_POSTGRESQL__NAME=${AUTHENTIK_POSTGRESQL__NAME}
+                - AUTHENTIK_POSTGRESQL__PASSWORD=${AUTHENTIK_POSTGRESQL__PASSWORD}
+              volumes:
+                - ./media:/media
+                - ./custom-templates:/templates
+              ports:
+                - "${COMPOSE_PORT_HTTP:-9000}:9000"
+                - "${COMPOSE_PORT_HTTPS:-9443}:9443"
+              depends_on:
+                postgresql:
+                  condition: service_healthy
+                redis:
+                  condition: service_healthy
+            worker:
+              image: ghcr.io/goauthentik/server:2024.2.2
+              container_name: authentik-worker
+              restart: unless-stopped
+              command: worker
+              env_file:
+                - .env
+              environment:
+                - AUTHENTIK_SECRET_KEY=${AUTHENTIK_SECRET_KEY}
+                - AUTHENTIK_REDIS__HOST=redis
+                - AUTHENTIK_POSTGRESQL__HOST=postgresql
+                - AUTHENTIK_POSTGRESQL__USER=${AUTHENTIK_POSTGRESQL__USER}
+                - AUTHENTIK_POSTGRESQL__NAME=${AUTHENTIK_POSTGRESQL__NAME}
+                - AUTHENTIK_POSTGRESQL__PASSWORD=${AUTHENTIK_POSTGRESQL__PASSWORD}
+              user: root
+              volumes:
+                - /var/run/docker.sock:/var/run/docker.sock
+                - ./media:/media
+                - ./certs:/certs
+                - ./custom-templates:/templates
+              depends_on:
+                postgresql:
+                  condition: service_healthy
+                redis:
+                  condition: service_healthy
+             
+          volumes:
+            database:
+              driver: local
+            redis:
+              driver: local
+          EOF
+          
+          # Set proper ownership
+          chown ubuntu:ubuntu /home/ubuntu/docker-compose.yml
+          
+          # Create required directories
+          mkdir -p /home/ubuntu/media /home/ubuntu/custom-templates /home/ubuntu/certs
+          chown -R ubuntu:ubuntu /home/ubuntu/media /home/ubuntu/custom-templates /home/ubuntu/certs
+          
+          echo "docker-compose.yml file created successfully at $(date)!"
+      Tags:
+        - Key: "Name"
+          Value: "VPSInstance"
+
+Outputs:
+  InstancePublicDNS:
+    Description: Public DNS name of the EC2 instance
+    Value: !GetAtt VPSInstance.PublicDnsName
+  
+  SetupInstructions:
+    Description: Instructions for setting up DNS
+    Value: !Sub |
+      Your Authentik instance is being set up at: ${VPSInstance.PublicDnsName}
+      
+      To complete the setup:
+      
+      1. Create an A record in your DNS settings for 'authentik.yourdomain.com' pointing to the EC2 instance's IP address.
+      
+      2. Wait for DNS propagation (may take up to 24-48 hours, but often much faster).
+      
+      3. Once DNS is propagated, you can access Authentik at: http://${VPSInstance.PublicDnsName}
+      
+      4. During first login, you'll be prompted to create an admin account.
+      
+      5. For security, use a strong password and enable two-factor authentication.
+      
+      6. Configure SSL certificates for HTTPS access in production environments.

@@ -1,0 +1,350 @@
+Resources:
+  AuthVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: auth
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref AuthVPC
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: auth-public-1
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref AuthVPC
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: 10.0.2.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: auth-public-2
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref AuthVPC
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: 10.0.3.0/24
+      Tags:
+        - Key: Name
+          Value: auth-private-1
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref AuthVPC
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: 10.0.4.0/24
+      Tags:
+        - Key: Name
+          Value: auth-private-2
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: auth-igw
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref AuthVPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref AuthVPC
+      Tags:
+        - Key: Name
+          Value: auth-public-rt
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  S3Endpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.s3
+      VpcId: !Ref AuthVPC
+      RouteTableIds:
+        - !Ref PublicRouteTable
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action: "*"
+            Resource: "*"
+
+  VPSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for VPS EC2 instance
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0  # For SSH access (restrict this to your IP)
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0  # For HTTP access
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0  # For HTTPS access
+        - IpProtocol: tcp
+          FromPort: 9091
+          ToPort: 9091
+          CidrIp: 0.0.0.0/0  # For Authelia access
+
+  VPSInstance:
+    Type: "AWS::EC2::Instance"
+    Properties:
+      ImageId: "ami-0df368112825f8d8f" # Replace with your Ubuntu AMI
+      InstanceType: "t2.micro"
+      KeyName: "VPS" # Name of your existing key pair
+      SecurityGroupIds:
+        - !Ref VPSSecurityGroup
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash -xe
+          
+          # Log all output to a file for debugging
+          exec > >(tee /var/log/user-data.log) 2>&1
+          
+          echo "Starting user data script execution at $(date)"
+          
+          # Try to wait for cloud-init with a timeout
+          timeout 60 cloud-init status --wait || echo "Cloud-init wait timed out after 60 seconds, continuing anyway"
+          
+          # Sleep a bit to give system time to settle
+          sleep 30
+          
+          echo "Proceeding with Docker installation at $(date)"
+          
+          # Update package lists
+          apt-get update
+          
+          # Install prerequisites
+          apt-get install -y ca-certificates curl gnupg
+          
+          # Set up Docker repository
+          install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+          chmod a+r /etc/apt/keyrings/docker.asc
+          
+          # Add Docker repository
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+          
+          # Update package lists again with Docker repository
+          apt-get update
+          
+          # Install Docker
+          apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+          
+          # Add the default user to the docker group
+          usermod -aG docker ubuntu
+          
+          # Enable Docker service
+          systemctl enable docker.service
+          systemctl enable containerd.service
+          systemctl start docker.service
+          
+          echo "Docker installation completed successfully at $(date)!"
+          
+          # Create Authelia configuration directories
+          mkdir -p /home/ubuntu/config
+          
+          # Generate JWT and encryption secrets - extract only the actual random string
+          JWT_SECRET=$(docker run --rm authelia/authelia:latest authelia crypto rand --length 128 --charset alphanumeric | grep -o '[a-zA-Z0-9]\{128\}')
+          ENCRYPTION_KEY=$(docker run --rm authelia/authelia:latest authelia crypto rand --length 128 --charset alphanumeric | grep -o '[a-zA-Z0-9]\{128\}')
+          SESSION_SECRET=$(docker run --rm authelia/authelia:latest authelia crypto rand --length 64 --charset alphanumeric | grep -o '[a-zA-Z0-9]\{64\}')
+                    
+          # Create Authelia configuration file with proper YAML syntax
+          cat > /home/ubuntu/config/configuration.yml << EOF
+          ---
+          ###############################################################
+          #                   Authelia configuration                    #
+          ###############################################################
+          server:
+            address: 'tcp://:9091'
+            disable_healthcheck: false
+            tls:
+              key: /certs/live/authelia.mcpgateway.online/privkey.pem
+              certificate: /certs/live/authelia.mcpgateway.online/fullchain.pem
+
+          jwt_secret: ${JWT_SECRET}
+          default_redirection_url: https://authelia.mcpgateway.online
+          
+          log:
+            level: debug
+          
+          totp:
+            issuer: authelia.mcpgateway.online
+          
+          authentication_backend:
+            file:
+              path: /config/users_database.yml
+          
+          access_control:
+            default_policy: deny
+            rules:
+              - domain: "*.mcpgateway.online"
+                policy: one_factor
+          
+          session:
+            name: authelia_session
+            domain: mcpgateway.online
+            secret: ${SESSION_SECRET}
+            expiration: 1h
+            inactivity: 5m
+            remember_me_duration: 1M
+          
+          regulation:
+            max_retries: 3
+            find_time: 120
+            ban_time: 300
+          
+          storage:
+            encryption_key: ${ENCRYPTION_KEY}
+            local:
+              path: /config/db.sqlite3
+          
+          notifier:
+            filesystem:
+              filename: /config/notification.txt
+          EOF
+          
+          # Create users database file
+          cat > /home/ubuntu/config/users_database.yml << EOF
+          ---
+          ###############################################################
+          #                         Users Database                      #
+          ###############################################################
+          
+          users:
+            user1:
+              disabled: false
+              displayname: "User1"
+              password: "\$argon2id\$v=19\$m=65536,t=3,p=4\$yJqRgSVgFHFUNn/wy+37wA\$NaVCU4xvQlfeYqG7rpqWKysJGgB8etlZwxpj9bHmU5k"
+              email: test@example.com
+              groups:
+                - admin
+                - user
+            user2:
+              disabled: false
+              displayname: "User2"
+              password: "\$argon2id\$v=19\$m=65536,t=3,p=4\$yJqRgSVgFHFUNn/wy+37wA\$NaVCU4xvQlfeYqG7rpqWKysJGgB8etlZwxpj9bHmU5k"
+              email: test+user2@example.com
+          EOF
+          
+          # Create docker-compose.yml file
+          cat > /home/ubuntu/docker-compose.yml << EOF
+          version: '3'
+          
+          services:
+            authelia:
+              image: authelia/authelia
+              container_name: authelia
+              volumes:
+                - ./config:/config
+                - /etc/letsencrypt:/certs:ro
+              ports:
+                - "443:9091"
+              expose:
+                - 443
+              restart: unless-stopped
+              environment:
+                - TZ=Europe/London
+          
+          volumes:
+            authelia_data:
+              driver: local
+          EOF
+                    
+          # Set proper ownership
+          chown -R ubuntu:ubuntu /home/ubuntu/config
+          chown ubuntu:ubuntu /home/ubuntu/docker-compose.yml
+          
+          echo "Install certbot and generating SSL certificates"
+          
+          # Install certbot for SSL certificates
+          apt-get install -y certbot
+          
+          # Generate SSL certificate with certbot
+          certbot certonly --standalone \
+            --non-interactive \
+            --agree-tos \
+            --email ivobrett@iname.com \
+            --domain authelia.mcpgateway.online \
+            --deploy-hook "docker compose -f /home/ubuntu/docker-compose.yml restart authelia" \
+            --preferred-challenges http
+          #  --staging
+
+          echo "Authelia configuration completed successfully at $(date)!"
+
+      Tags:
+        - Key: "Name"
+          Value: "VPSInstance"
+
+Outputs:
+  InstancePublicDNS:
+    Description: Public DNS name of the EC2 instance
+    Value: !GetAtt VPSInstance.PublicDnsName
+  
+  SetupInstructions:
+    Description: Instructions for setting up DNS
+    Value: !Sub |
+      Your Authelia instance has been set up at: ${VPSInstance.PublicDnsName}
+      
+      To complete the setup:
+      
+      1. Create an A record in your DNS settings for 'authelia.mcpgateway.online' pointing to the EC2 instance's IP address.
+      
+      2. Wait for DNS propagation (may take up to 24-48 hours, but often much faster).
+      
+      3. Once DNS is propagated, you can access Authelia at: https://authelia.mcpgateway.online
+      
+      4. Default login credentials:
+         Username: user1
+         Password: The default password in the configuration
+         
+      5. For security, change the default passwords after first login.
+
+      6. If using Cloudflare, . Switch to "Full (Strict)" SSL mode (recommended). 
+         This ensures Cloudflare only connects to your server with valid SSL certs.
+
+
