@@ -308,8 +308,8 @@ Resources:
           certbot certonly --standalone \
             --non-interactive \
             --agree-tos \
-            --email ivobrett@iname.com \
-            --domain authelia.mcpgateway.online \
+            --email youremail@mail.com \
+            --domain authelia.yourdomain.com \
             --deploy-hook "docker compose -f /home/ubuntu/docker-compose.yml restart authelia" \
             --preferred-challenges http
           #  --staging
@@ -332,11 +332,11 @@ Outputs:
       
       To complete the setup:
       
-      1. Create an A record in your DNS settings for 'authelia.mcpgateway.online' pointing to the EC2 instance's IP address.
+      1. Create an A record in your DNS settings for 'authelia.yourdomain.com' pointing to the EC2 instance's IP address.
       
       2. Wait for DNS propagation (may take up to 24-48 hours, but often much faster).
       
-      3. Once DNS is propagated, you can access Authelia at: https://authelia.mcpgateway.online
+      3. Once DNS is propagated, you can access Authelia at: https://authelia.yourdomain.com
       
       4. Default login credentials:
          Username: user1
