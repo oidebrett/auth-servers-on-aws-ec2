@@ -47,4 +47,4 @@ More authentication server templates will be added in the future. Contributions 
 
 ## License
 
-[Add your license information here]
+See license [here](LICENSE)
