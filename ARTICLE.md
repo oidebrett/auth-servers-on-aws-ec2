@@ -42,7 +42,7 @@ Example:
 ```text
 Enter your domain name (e.g., example.com): yourdomain.com
 Enter authentication subdomain (e.g., auth): auth
-Enter email for Let's Encrypt certificates: ivobrett@iname.com
+Enter email for Let's Encrypt certificates: admin@yourdomain.com
 Enter your IP address for SSH access (or 0.0.0.0/0 for any IP): 0.0.0.0/0
 ```
 
