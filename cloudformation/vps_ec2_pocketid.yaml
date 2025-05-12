@@ -125,16 +125,12 @@ Resources:
           FromPort: 443
           ToPort: 443
           CidrIp: 0.0.0.0/0  # For HTTPS access
-        - IpProtocol: tcp
-          FromPort: 9091
-          ToPort: 9091
-          CidrIp: 0.0.0.0/0  # For Authelia access
 
   VPSInstance:
     Type: "AWS::EC2::Instance"
     Properties:
       ImageId: "ami-0df368112825f8d8f" # Replace with your Ubuntu AMI if required (this is the standard ubuntu)
-      InstanceType: "t2.micro"
+      InstanceType: "t3.small"
       KeyName: "VPS" # Name of your existing key pair
       SecurityGroupIds:
         - !Ref VPSSecurityGroup
@@ -185,138 +181,74 @@ Resources:
           
           echo "Docker installation completed successfully at $(date)!"
           
-          # Create Authelia configuration directories
-          mkdir -p /home/ubuntu/config
+          # Create directories for PocketID and Traefik
+          mkdir -p /home/ubuntu/pocketid
+          mkdir -p /home/ubuntu/traefik/letsencrypt
           
-          # Generate JWT and encryption secrets - extract only the actual random string
-          JWT_SECRET=$(docker run --rm authelia/authelia:latest authelia crypto rand --length 128 --charset alphanumeric | grep -o '[a-zA-Z0-9]\{128\}')
-          ENCRYPTION_KEY=$(docker run --rm authelia/authelia:latest authelia crypto rand --length 128 --charset alphanumeric | grep -o '[a-zA-Z0-9]\{128\}')
-          SESSION_SECRET=$(docker run --rm authelia/authelia:latest authelia crypto rand --length 64 --charset alphanumeric | grep -o '[a-zA-Z0-9]\{64\}')
-                    
-          # Create Authelia configuration file with proper YAML syntax
-          cat > /home/ubuntu/config/configuration.yml << EOF
-          ---
-          ###############################################################
-          #                   Authelia configuration                    #
-          ###############################################################
-          server:
-            address: 'tcp://:9091'
-            disable_healthcheck: false
-            tls:
-              key: /certs/live/authelia.mcpgateway.online/privkey.pem
-              certificate: /certs/live/authelia.mcpgateway.online/fullchain.pem
-
-          jwt_secret: ${JWT_SECRET}
-          default_redirection_url: https://authelia.mcpgateway.online
-          
-          log:
-            level: debug
-          
-          totp:
-            issuer: authelia.mcpgateway.online
-          
-          authentication_backend:
-            file:
-              path: /config/users_database.yml
-          
-          access_control:
-            default_policy: deny
-            rules:
-              - domain: "*.mcpgateway.online"
-                policy: one_factor
-          
-          session:
-            name: authelia_session
-            domain: mcpgateway.online
-            secret: ${SESSION_SECRET}
-            expiration: 1h
-            inactivity: 5m
-            remember_me_duration: 1M
-          
-          regulation:
-            max_retries: 3
-            find_time: 120
-            ban_time: 300
-          
-          storage:
-            encryption_key: ${ENCRYPTION_KEY}
-            local:
-              path: /config/db.sqlite3
-          
-          notifier:
-            filesystem:
-              filename: /config/notification.txt
-          EOF
-          
-          # Create users database file
-          cat > /home/ubuntu/config/users_database.yml << EOF
-          ---
-          ###############################################################
-          #                         Users Database                      #
-          ###############################################################
-          # the test password for both users is "password"
-          # you can generate new passwords with: docker run --rm authelia/authelia:latest authelia crypto hash-password yourpassword
-          users:
-            user1:
-              disabled: false
-              displayname: "User1"
-              password: "\$argon2id\$v=19\$m=65536,t=3,p=4\$yJqRgSVgFHFUNn/wy+37wA\$NaVCU4xvQlfeYqG7rpqWKysJGgB8etlZwxpj9bHmU5k"
-              email: test@example.com
-              groups:
-                - admin
-                - user
-            user2:
-              disabled: false
-              displayname: "User2"
-              password: "\$argon2id\$v=19\$m=65536,t=3,p=4\$yJqRgSVgFHFUNn/wy+37wA\$NaVCU4xvQlfeYqG7rpqWKysJGgB8etlZwxpj9bHmU5k"
-              email: test+user2@example.com
-          EOF
-          
-          # Create docker-compose.yml file
-          cat > /home/ubuntu/docker-compose.yml << EOF
+          # Create docker-compose.yml file with Traefik and PocketID using labels
+          cat > /home/ubuntu/docker-compose.yml << 'EOF'
           version: '3'
           
           services:
-            authelia:
-              image: authelia/authelia
-              container_name: authelia
-              volumes:
-                - ./config:/config
-                - /etc/letsencrypt:/certs:ro
-              ports:
-                - "443:9091"
-              expose:
-                - 443
+            traefik:
+              image: traefik:v2.10
+              container_name: traefik
               restart: unless-stopped
-              environment:
-                - TZ=Europe/London
+              ports:
+                - "80:80"
+                - "443:443"
+              command:
+                - "--api.insecure=false"
+                - "--providers.docker=true"
+                - "--providers.docker.exposedbydefault=false"
+                - "--entrypoints.web.address=:80"
+                - "--entrypoints.websecure.address=:443"
+                - "--certificatesresolvers.myresolver.acme.httpchallenge=true"
+                - "--certificatesresolvers.myresolver.acme.httpchallenge.entrypoint=web"
+                - "--certificatesresolvers.myresolver.acme.email=admin@mcpgateway.online"
+                - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+              volumes:
+                - /var/run/docker.sock:/var/run/docker.sock:ro
+                - ./traefik/letsencrypt:/letsencrypt
+              networks:
+                - proxy
           
-          volumes:
-            authelia_data:
-              driver: local
+            pocketid:
+              image: pocketbase/pocketbase:latest
+              container_name: pocketid
+              restart: unless-stopped
+              volumes:
+                - ./pocketid:/pb_data
+              networks:
+                - proxy
+              labels:
+                - "traefik.enable=true"
+                - "traefik.http.routers.pocketid.rule=Host(`pocketid.mcpgateway.online`)"
+                - "traefik.http.routers.pocketid.entrypoints=websecure"
+                - "traefik.http.routers.pocketid.tls=true"
+                - "traefik.http.routers.pocketid.tls.certresolver=myresolver"
+                - "traefik.http.services.pocketid.loadbalancer.server.port=8090"
+                - "traefik.http.routers.pocketid-http.rule=Host(`pocketid.mcpgateway.online`)"
+                - "traefik.http.routers.pocketid-http.entrypoints=web"
+                - "traefik.http.routers.pocketid-http.middlewares=redirect-to-https"
+                - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+          
+          networks:
+            proxy:
+              driver: bridge
           EOF
-                    
+          
           # Set proper ownership
-          chown -R ubuntu:ubuntu /home/ubuntu/config
+          chown -R ubuntu:ubuntu /home/ubuntu/pocketid
+          chown -R ubuntu:ubuntu /home/ubuntu/traefik
           chown ubuntu:ubuntu /home/ubuntu/docker-compose.yml
           
-          echo "Install certbot and generating SSL certificates"
+          # Start the containers
+          cd /home/ubuntu
+          sudo -u ubuntu docker compose up -d
           
-          # Install certbot for SSL certificates
-          apt-get install -y certbot
+          echo "PocketID with Traefik setup completed successfully at $(date)!"
           
-          # Generate SSL certificate with certbot
-          certbot certonly --standalone \
-            --non-interactive \
-            --agree-tos \
-            --email youremail@mail.com \
-            --domain authelia.yourdomain.com \
-            --deploy-hook "docker compose -f /home/ubuntu/docker-compose.yml restart authelia" \
-            --preferred-challenges http
-          #  --staging
-
-          echo "Authelia configuration completed successfully at $(date)!"
-
       Tags:
         - Key: "Name"
           Value: "VPSInstance"
@@ -329,23 +261,16 @@ Outputs:
   SetupInstructions:
     Description: Instructions for setting up DNS
     Value: !Sub |
-      Your Authelia instance has been set up at: ${VPSInstance.PublicDnsName}
+      Your Docker-enabled EC2 instance is available at: ${VPSInstance.PublicDnsName}
       
       To complete the setup:
       
-      1. Create an A record in your DNS settings for 'authelia.yourdomain.com' pointing to the EC2 instance's IP address.
+      1. SSH into your instance using: ssh ubuntu@${VPSInstance.PublicDnsName}
       
-      2. Wait for DNS propagation (may take up to 24-48 hours, but often much faster).
+      2. Docker and Docker Compose are already installed and ready to use.
       
-      3. Once DNS is propagated, you can access Authelia at: https://authelia.yourdomain.com
+      3. Deploy your containers using Docker Compose.
       
-      4. Default login credentials:
-         Username: user1
-         Password: The default password in the configuration
-         
-      5. For security, change the default passwords after first login.
-
-      6. If using Cloudflare, . Switch to "Full (Strict)" SSL mode (recommended). 
-         This ensures Cloudflare only connects to your server with valid SSL certs.
-
-
+      4. For web applications, create appropriate DNS records pointing to this instance.
+      
+      5. Consider setting up SSL certificates for secure HTTPS connections.

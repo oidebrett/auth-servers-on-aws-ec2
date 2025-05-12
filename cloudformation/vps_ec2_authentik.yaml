@@ -129,7 +129,7 @@ Resources:
   VPSInstance:
     Type: "AWS::EC2::Instance"
     Properties:
-      ImageId: "ami-0df368112825f8d8f" # Replace with your Ubuntu AMI
+      ImageId: "ami-0df368112825f8d8f" # Replace with your Ubuntu AMI if required (this is the standard ubuntu)
       InstanceType: "t3.small"
       KeyName: "VPS" # Name of your existing key pair
       SecurityGroupIds:
