@@ -1,0 +1,24 @@
+# Output directory from customize_templates.sh
+output/
+output/*
+
+# Common OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*~
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.bak
+
+# Environment files
+.env
+.env.*

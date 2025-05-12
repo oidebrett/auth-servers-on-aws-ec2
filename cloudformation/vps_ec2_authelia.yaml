@@ -203,17 +203,17 @@ Resources:
             address: 'tcp://:9091'
             disable_healthcheck: false
             tls:
-              key: /certs/live/authelia.mcpgateway.online/privkey.pem
-              certificate: /certs/live/authelia.mcpgateway.online/fullchain.pem
+              key: /certs/live/auth.yourdomain.com/privkey.pem
+              certificate: /certs/live/auth.yourdomain.com/fullchain.pem
 
           jwt_secret: ${JWT_SECRET}
-          default_redirection_url: https://authelia.mcpgateway.online
+          default_redirection_url: https://auth.yourdomain.com
           
           log:
             level: debug
           
           totp:
-            issuer: authelia.mcpgateway.online
+            issuer: auth.yourdomain.com
           
           authentication_backend:
             file:
@@ -222,12 +222,12 @@ Resources:
           access_control:
             default_policy: deny
             rules:
-              - domain: "*.mcpgateway.online"
+              - domain: "*.yourdomain.com"
                 policy: one_factor
           
           session:
             name: authelia_session
-            domain: mcpgateway.online
+            domain: yourdomain.com
             secret: ${SESSION_SECRET}
             expiration: 1h
             inactivity: 5m
@@ -333,11 +333,11 @@ Outputs:
       
       To complete the setup:
       
-      1. Create an A record in your DNS settings for 'authelia.yourdomain.com' pointing to the EC2 instance's IP address.
+      1. Create an A record in your DNS settings for 'auth.yourdomain.com' pointing to the EC2 instance's IP address.
       
       2. Wait for DNS propagation (may take up to 24-48 hours, but often much faster).
       
-      3. Once DNS is propagated, you can access Authelia at: https://authelia.yourdomain.com
+      3. Once DNS is propagated, you can access Authelia at: https://auth.yourdomain.com
       
       4. Default login credentials:
          Username: user1

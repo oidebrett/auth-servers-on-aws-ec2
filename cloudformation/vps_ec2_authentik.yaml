@@ -327,7 +327,7 @@ Outputs:
       
       To complete the setup:
       
-      1. Create an A record in your DNS settings for 'authentik.yourdomain.com' pointing to the EC2 instance's IP address.
+      1. Create an A record in your DNS settings for 'auth.yourdomain.com' pointing to the EC2 instance's IP address.
       
       2. Wait for DNS propagation (may take up to 24-48 hours, but often much faster).
       

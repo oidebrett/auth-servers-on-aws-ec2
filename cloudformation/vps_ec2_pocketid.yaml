@@ -130,7 +130,7 @@ Resources:
     Type: "AWS::EC2::Instance"
     Properties:
       ImageId: "ami-0df368112825f8d8f" # Replace with your Ubuntu AMI if required (this is the standard ubuntu)
-      InstanceType: "t3.small"
+      InstanceType: "t2.micro"
       KeyName: "VPS" # Name of your existing key pair
       SecurityGroupIds:
         - !Ref VPSSecurityGroup
@@ -188,10 +188,10 @@ Resources:
           # Create docker-compose.yml file with Traefik and PocketID using labels
           cat > /home/ubuntu/docker-compose.yml << 'EOF'
           version: '3'
-          
+
           services:
             traefik:
-              image: traefik:v2.10
+              image: traefik:v3.4.0
               container_name: traefik
               restart: unless-stopped
               ports:
@@ -205,48 +205,43 @@ Resources:
                 - "--entrypoints.websecure.address=:443"
                 - "--certificatesresolvers.myresolver.acme.httpchallenge=true"
                 - "--certificatesresolvers.myresolver.acme.httpchallenge.entrypoint=web"
-                - "--certificatesresolvers.myresolver.acme.email=admin@mcpgateway.online"
+                - "--certificatesresolvers.myresolver.acme.email=admin@yourdomain.com"
                 - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
               volumes:
                 - /var/run/docker.sock:/var/run/docker.sock:ro
                 - ./traefik/letsencrypt:/letsencrypt
-              networks:
-                - proxy
-          
+
             pocketid:
-              image: pocketbase/pocketbase:latest
-              container_name: pocketid
+              image: ghcr.io/pocket-id/pocket-id
+              container_name: pocket-id
               restart: unless-stopped
+              env_file: .env
               volumes:
-                - ./pocketid:/pb_data
-              networks:
-                - proxy
+                - "./pocketid:/app/backend/data"
               labels:
                 - "traefik.enable=true"
-                - "traefik.http.routers.pocketid.rule=Host(`pocketid.mcpgateway.online`)"
-                - "traefik.http.routers.pocketid.entrypoints=websecure"
-                - "traefik.http.routers.pocketid.tls=true"
-                - "traefik.http.routers.pocketid.tls.certresolver=myresolver"
-                - "traefik.http.services.pocketid.loadbalancer.server.port=8090"
-                - "traefik.http.routers.pocketid-http.rule=Host(`pocketid.mcpgateway.online`)"
-                - "traefik.http.routers.pocketid-http.entrypoints=web"
-                - "traefik.http.routers.pocketid-http.middlewares=redirect-to-https"
-                - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
-          
-          networks:
-            proxy:
-              driver: bridge
+                - "traefik.http.routers.pocket-id.entrypoints=websecure"
+                - "traefik.http.routers.pocket-id.rule=Host(`auth.yourdomain.com`)"
+                - "traefik.http.routers.pocket-id.tls=true"
+                - "traefik.http.routers.pocket-id.tls.certresolver=myresolver"
+                - "traefik.http.routers.pocket-id.service=pocket-id"
+                - "traefik.http.services.pocket-id.loadbalancer.server.port=80"
+                - "traefik.http.routers.pocket-id.middlewares=redirect-to-https"
+                - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"          
           EOF
           
+          # Create .env file for PocketId
+          cat > /home/ubuntu/.env << 'EOF'
+          # See the documentation for more information: https://pocket-id.org/docs/configuration/environment-variables
+          PUBLIC_APP_URL=https://auth.yourdomain.com
+          EOF
+
+
           # Set proper ownership
           chown -R ubuntu:ubuntu /home/ubuntu/pocketid
           chown -R ubuntu:ubuntu /home/ubuntu/traefik
           chown ubuntu:ubuntu /home/ubuntu/docker-compose.yml
-          
-          # Start the containers
-          cd /home/ubuntu
-          sudo -u ubuntu docker compose up -d
-          
+                    
           echo "PocketID with Traefik setup completed successfully at $(date)!"
           
       Tags:
