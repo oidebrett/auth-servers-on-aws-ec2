@@ -93,7 +93,10 @@ Check logs to verify the setup:
 cat /var/log/user-data.log
 ```
 
-If needed, manually bring up containers:
+Wait about 2 minutes for the server to initialize and the installation to complete. 
+Note, Authentik will take longer to initialize.
+
+Manually bring up containers:
 
 ```bash
 cd ~
@@ -150,11 +153,28 @@ You should go into AWS Cloudformation and **delete** your stack otherwise you wi
 
 Troubleshooting
 
-## If you get an error like this after running pocketid
+### If you get an error like this after running pocketid
 ```
 traefik   | 2025-05-12T10:55:46Z ERR Unable to obtain ACME certificate for domains error="unable to generate a certificate for the domains [auth.yourdomain]: error: one or more domains had a problem:\n[auth.yourdomain] invalid authorization: acme: error: 403 :: urn:ietf:params:acme:error:unauthorized :: XX.XX.XX.XX: Invalid response from http://auth.yourdomain.com/.well-known/acme-challenge/kFm8QW5WJbhFTNw1preCE5DXNXZWNxgaEmeUCadYkB8: 404\n" ACME CA=https://acme-v02.api.letsencrypt.org/directory acmeCA=https://acme-v02.api.letsencrypt.org/directory domains=["auth.yourdomain.com"] providerName=myresolver.acme routerName=pocketid@docker rule=Host(`auth.yourdomain.com`)
 ```
 its because letsencrpyt is sending a challenge to the subdomain. You will need to set up your DNS for the subdomain and try again.
+
+
+### If you get errors creating letencrypt certificates using certbot
+```
+An unexpected error occurred:
+too many certificates (5) already issued for this exact set of domains in the last 168h0m0s, retry after 2025-05-13 21:05:08 UTC: see https://letsencrypt.org/docs/rate-limits/#new-certificates-per-exact-set-of-hostnames
+```
+
+its because you have hit the letsencrypt rate limit. You can either wait or use a different domain. Or you can try the --staging flag in the certbot command.
+
+```
+The Certificate Authority failed to download the challenge files from the temporary standalone webserver started by Certbot on port 80. Ensure that the listed domains point to this machine and that it can accept inbound connections from the internet.
+
+Some challenges have failed.
+```
+
+This is because letsencrypt cant reach your server. You may need to open port 80 in your security group AND make sure that you have set up your DNS correctly.
 
 ## 🙏 Thanks for Reading
 

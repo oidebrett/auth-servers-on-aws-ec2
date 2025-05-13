@@ -116,17 +116,63 @@ fi
 
 echo "Found ${#templates[@]} template files to process."
 
+# Add debug function to check original templates
+check_original_templates() {
+    echo ""
+    echo "Checking original templates for patterns to replace:"
+    for template in "${templates[@]}"; do
+        template_path="${template_dir}/${template}"
+        echo "Checking $template for auth.yourdomain.com:"
+        grep -c "auth\.yourdomain\.com" "$template_path" || echo "No matches found"
+        
+        echo "Checking $template for yourdomain.com:"
+        grep -c "yourdomain\.com" "$template_path" || echo "No matches found"
+    done
+}
+
+# Add a function to examine the content of the template files
+examine_template_content() {
+    echo ""
+    echo "Examining template content for domain patterns:"
+    
+    # Check the PocketID template specifically
+    template="vps_ec2_pocketid.yaml"
+    template_path="${template_dir}/${template}"
+    
+    echo "Searching for domain patterns in $template_path:"
+    echo "--------------------------------------------"
+    
+    # Look for various domain patterns
+    echo "Lines containing 'yourdomain':"
+    grep "yourdomain" "$template_path" | head -10
+    
+    echo ""
+    echo "Lines containing 'auth.':"
+    grep "auth\." "$template_path" | head -10
+    
+    echo ""
+    echo "Lines containing '.com':"
+    grep "\.com" "$template_path" | head -10
+    
+    echo "--------------------------------------------"
+}
+
+# Call the examination function before processing templates
+examine_template_content
+
+# Call the debug function before processing templates
+check_original_templates
+
 for template in "${templates[@]}"; do
     template_path="${template_dir}/${template}"
     output_path="${output_dir}/${template}"
     echo "Processing $template_path..."
     
+    # Add debug output to see what we're replacing
+    echo "Replacing auth.yourdomain.com with $auth_subdomain.$domain"
+    
     # Replace domain names and save to output directory
-    sed -e "s/yourdomain\.com/$domain/g" \
-        -e "s/mydomain\.com/$domain/g" \
-        -e "s/youremail@mail\.com/$email/g" \
-        -e "s/admin@yourdomain\.com/$email/g" \
-        -e "s|CidrIp: 0\.0\.0\.0/0  # For SSH access|CidrIp: $ip_address  # For SSH access|g" \
+    sed -e "s|CidrIp: 0\.0\.0\.0/0  # For SSH access|CidrIp: $ip_address  # For SSH access|g" \
         -e "s|CidrIp: 0\.0\.0\.0/0  # For SSH access (restrict this to your IP)|CidrIp: $ip_address  # For SSH access (restrict this to your IP)|g" \
         -e "s/auth\.yourdomain\.com/$auth_subdomain.$domain/g" \
         -e "s/authelia\.yourdomain\.com/$auth_subdomain.$domain/g" \
@@ -136,8 +182,12 @@ for template in "${templates[@]}"; do
         -e "s/authelia\.mydomain\.com/$auth_subdomain.$domain/g" \
         -e "s/authentik\.mydomain\.com/$auth_subdomain.$domain/g" \
         -e "s/pocketid\.mydomain\.com/$auth_subdomain.$domain/g" \
+        -e "s/youremail@mail\.com/$email/g" \
+        -e "s/admin@yourdomain\.com/$email/g" \
+        -e "s/yourdomain\.com/$domain/g" \
+        -e "s/mydomain\.com/$domain/g" \
         "$template_path" > "$output_path"
-    
+        
     echo "Created customized template: $output_path"
 done
 
@@ -146,3 +196,12 @@ echo "All templates have been customized successfully!"
 echo "Customized templates are available in the '$output_dir' directory."
 echo "Authentication server will be accessible at: $auth_subdomain.$domain"
 echo "Remember to update your DNS records after deployment."
+
+# Add verification test
+echo ""
+echo "Verification test for subdomain replacements:"
+for template in "${templates[@]}"; do
+    output_path="${output_dir}/${template}"
+    echo "Checking $template for $auth_subdomain.$domain:"
+    grep -c "$auth_subdomain.$domain" "$output_path" || echo "No changes made"
+done

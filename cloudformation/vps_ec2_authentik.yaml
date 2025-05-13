@@ -246,7 +246,7 @@ Resources:
               volumes:
                 - redis:/data
             server:
-              image: ghcr.io/goauthentik/server:2024.2.2
+              image: ghcr.io/goauthentik/server:2025.2.4
               container_name: authentik-server
               restart: unless-stopped
               command: server
@@ -262,6 +262,8 @@ Resources:
               volumes:
                 - ./media:/media
                 - ./custom-templates:/templates
+                - /etc/letsencrypt/live/auth.yourdomain.com:/certs/auth.yourdomain.com
+                - /etc/letsencrypt/archive/auth.yourdomain.com:/archive/auth.yourdomain.com                
               ports:
                 - "${COMPOSE_PORT_HTTP:-9000}:9000"
                 - "${COMPOSE_PORT_HTTPS:-9443}:9443"
@@ -271,7 +273,7 @@ Resources:
                 redis:
                   condition: service_healthy
             worker:
-              image: ghcr.io/goauthentik/server:2024.2.2
+              image: ghcr.io/goauthentik/server:2025.2.4
               container_name: authentik-worker
               restart: unless-stopped
               command: worker
@@ -289,6 +291,8 @@ Resources:
                 - /var/run/docker.sock:/var/run/docker.sock
                 - ./media:/media
                 - ./certs:/certs
+                - /etc/letsencrypt/live/auth.yourdomain.com:/certs/auth.yourdomain.com
+                - /etc/letsencrypt/archive/auth.yourdomain.com:/archive/auth.yourdomain.com                
                 - ./custom-templates:/templates
               depends_on:
                 postgresql:
@@ -309,8 +313,24 @@ Resources:
           # Create required directories
           mkdir -p /home/ubuntu/media /home/ubuntu/custom-templates /home/ubuntu/certs
           chown -R ubuntu:ubuntu /home/ubuntu/media /home/ubuntu/custom-templates /home/ubuntu/certs
+
+          echo "Install certbot and generating SSL certificates"
           
-          echo "docker-compose.yml file created successfully at $(date)!"
+          # Install certbot for SSL certificates
+          apt-get install -y certbot
+          
+          # Generate SSL certificate with certbot
+          certbot certonly --standalone \
+            --non-interactive \
+            --agree-tos \
+            --email admin@yourdomain.com \
+            --domain auth.yourdomain.com \
+            --deploy-hook "docker compose -f /home/ubuntu/docker-compose.yml restart server" \
+            --preferred-challenges http
+          #  --staging
+
+          echo "Authentik configuration completed successfully at $(date)!"
+
       Tags:
         - Key: "Name"
           Value: "VPSInstance"

@@ -309,8 +309,8 @@ Resources:
           certbot certonly --standalone \
             --non-interactive \
             --agree-tos \
-            --email youremail@mail.com \
-            --domain authelia.yourdomain.com \
+            --email admin@yourdomain.com \
+            --domain auth.yourdomain.com \
             --deploy-hook "docker compose -f /home/ubuntu/docker-compose.yml restart authelia" \
             --preferred-challenges http
           #  --staging
