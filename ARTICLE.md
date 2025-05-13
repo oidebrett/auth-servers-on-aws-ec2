@@ -137,6 +137,10 @@ https://yourapp.mydomain.com
 
 You should be redirected to your auth service (Authelia, Authentik, or PocketID), and after logging in, returned to your app.
 
+### Using Authentik for the first time
+
+To start the initial setup, navigate to https://yourapp.mydomain.com/if/flow/initial-setup/.
+
 ---
 
 ## 📌 Summary

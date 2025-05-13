@@ -201,8 +201,6 @@ Resources:
           AUTHENTIK_POSTGRESQL__USER=admin 
           AUTHENTIK_POSTGRESQL__NAME=authentik-db
           AUTHENTIK_POSTGRESQL__PASSWORD=${POSTGRES_PASSWORD}
-          COMPOSE_PORT_HTTP=80
-          COMPOSE_PORT_HTTPS=443
           EOF
           
           # Set proper ownership
@@ -214,6 +212,27 @@ Resources:
           # Create docker-compose.yml file
           cat > /home/ubuntu/docker-compose.yml << 'EOF'
           services:
+            traefik:
+              image: traefik:v3.4.0
+              container_name: traefik
+              restart: unless-stopped
+              ports:
+                - "80:80"
+                - "443:443"
+              command:
+                - "--api.insecure=false"
+                - "--providers.docker=true"
+                - "--providers.docker.exposedbydefault=false"
+                - "--entrypoints.web.address=:80"
+                - "--entrypoints.websecure.address=:443"
+                - "--certificatesresolvers.myresolver.acme.httpchallenge=true"
+                - "--certificatesresolvers.myresolver.acme.httpchallenge.entrypoint=web"
+                - "--certificatesresolvers.myresolver.acme.email=admin@yourdomain.com"
+                - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+              volumes:
+                - /var/run/docker.sock:/var/run/docker.sock:ro
+                - ./traefik/letsencrypt:/letsencrypt
+
             postgresql:
               image: docker.io/library/postgres:16-alpine
               container_name: authentik-postgresql
@@ -246,7 +265,7 @@ Resources:
               volumes:
                 - redis:/data
             server:
-              image: ghcr.io/goauthentik/server:2025.2.4
+              image: ghcr.io/goauthentik/server:2025.4.0
               container_name: authentik-server
               restart: unless-stopped
               command: server
@@ -262,18 +281,29 @@ Resources:
               volumes:
                 - ./media:/media
                 - ./custom-templates:/templates
-                - /etc/letsencrypt/live/auth.yourdomain.com:/certs/auth.yourdomain.com
-                - /etc/letsencrypt/archive/auth.yourdomain.com:/archive/auth.yourdomain.com                
               ports:
                 - "${COMPOSE_PORT_HTTP:-9000}:9000"
                 - "${COMPOSE_PORT_HTTPS:-9443}:9443"
+              expose:
+                - "${COMPOSE_PORT_HTTP:-9000}"
+                - "${COMPOSE_PORT_HTTPS:-9443}"
+              labels:
+                - "traefik.enable=true"
+                - "traefik.http.routers.authentik-server.entrypoints=websecure"
+                - "traefik.http.routers.authentik-server.rule=Host(`auth.yourdomain.com`)"
+                - "traefik.http.routers.authentik-server.tls=true"
+                - "traefik.http.routers.authentik-server.tls.certresolver=myresolver"
+                - "traefik.http.routers.authentik-server.service=authentik-server"
+                - "traefik.http.services.authentik-server.loadbalancer.server.port=${COMPOSE_PORT_HTTP:-9000}"
+                - "traefik.http.routers.authentik-server.middlewares=redirect-to-https"
+                - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"        
               depends_on:
                 postgresql:
                   condition: service_healthy
                 redis:
                   condition: service_healthy
             worker:
-              image: ghcr.io/goauthentik/server:2025.2.4
+              image: ghcr.io/goauthentik/server:2025.4.0
               container_name: authentik-worker
               restart: unless-stopped
               command: worker
@@ -291,8 +321,6 @@ Resources:
                 - /var/run/docker.sock:/var/run/docker.sock
                 - ./media:/media
                 - ./certs:/certs
-                - /etc/letsencrypt/live/auth.yourdomain.com:/certs/auth.yourdomain.com
-                - /etc/letsencrypt/archive/auth.yourdomain.com:/archive/auth.yourdomain.com                
                 - ./custom-templates:/templates
               depends_on:
                 postgresql:
@@ -313,21 +341,6 @@ Resources:
           # Create required directories
           mkdir -p /home/ubuntu/media /home/ubuntu/custom-templates /home/ubuntu/certs
           chown -R ubuntu:ubuntu /home/ubuntu/media /home/ubuntu/custom-templates /home/ubuntu/certs
-
-          echo "Install certbot and generating SSL certificates"
-          
-          # Install certbot for SSL certificates
-          apt-get install -y certbot
-          
-          # Generate SSL certificate with certbot
-          certbot certonly --standalone \
-            --non-interactive \
-            --agree-tos \
-            --email admin@yourdomain.com \
-            --domain auth.yourdomain.com \
-            --deploy-hook "docker compose -f /home/ubuntu/docker-compose.yml restart server" \
-            --preferred-challenges http
-          #  --staging
 
           echo "Authentik configuration completed successfully at $(date)!"
 

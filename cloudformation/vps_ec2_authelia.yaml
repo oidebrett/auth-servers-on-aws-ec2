@@ -202,9 +202,6 @@ Resources:
           server:
             address: 'tcp://:9091'
             disable_healthcheck: false
-            tls:
-              key: /certs/live/auth.yourdomain.com/privkey.pem
-              certificate: /certs/live/auth.yourdomain.com/fullchain.pem
 
           jwt_secret: ${JWT_SECRET}
           default_redirection_url: https://auth.yourdomain.com
@@ -277,6 +274,27 @@ Resources:
           version: '3'
           
           services:
+            traefik:
+              image: traefik:v3.4.0
+              container_name: traefik
+              restart: unless-stopped
+              ports:
+                - "80:80"
+                - "443:443"
+              command:
+                - "--api.insecure=false"
+                - "--providers.docker=true"
+                - "--providers.docker.exposedbydefault=false"
+                - "--entrypoints.web.address=:80"
+                - "--entrypoints.websecure.address=:443"
+                - "--certificatesresolvers.myresolver.acme.httpchallenge=true"
+                - "--certificatesresolvers.myresolver.acme.httpchallenge.entrypoint=web"
+                - "--certificatesresolvers.myresolver.acme.email=admin@yourdomain.com"
+                - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+              volumes:
+                - /var/run/docker.sock:/var/run/docker.sock:ro
+                - ./traefik/letsencrypt:/letsencrypt
+
             authelia:
               image: authelia/authelia
               container_name: authelia
@@ -284,9 +302,19 @@ Resources:
                 - ./config:/config
                 - /etc/letsencrypt:/certs:ro
               ports:
-                - "443:9091"
+                - "9091:9091"
               expose:
-                - 443
+                - 9091
+              labels:
+                - "traefik.enable=true"
+                - "traefik.http.routers.authelia.entrypoints=websecure"
+                - "traefik.http.routers.authelia.rule=Host(`auth.yourdomain.com`)"
+                - "traefik.http.routers.authelia.tls=true"
+                - "traefik.http.routers.authelia.tls.certresolver=myresolver"
+                - "traefik.http.routers.authelia.service=authelia"
+                - "traefik.http.services.authelia.loadbalancer.server.port=9091"
+                - "traefik.http.routers.authelia.middlewares=redirect-to-https"
+                - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"        
               restart: unless-stopped
               environment:
                 - TZ=Europe/London
@@ -300,21 +328,6 @@ Resources:
           chown -R ubuntu:ubuntu /home/ubuntu/config
           chown ubuntu:ubuntu /home/ubuntu/docker-compose.yml
           
-          echo "Install certbot and generating SSL certificates"
-          
-          # Install certbot for SSL certificates
-          apt-get install -y certbot
-          
-          # Generate SSL certificate with certbot
-          certbot certonly --standalone \
-            --non-interactive \
-            --agree-tos \
-            --email admin@yourdomain.com \
-            --domain auth.yourdomain.com \
-            --deploy-hook "docker compose -f /home/ubuntu/docker-compose.yml restart authelia" \
-            --preferred-challenges http
-          #  --staging
-
           echo "Authelia configuration completed successfully at $(date)!"
 
       Tags:
