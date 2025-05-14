@@ -139,7 +139,11 @@ You should be redirected to your auth service (Authelia, Authentik, or PocketID)
 
 ### Using Authentik for the first time
 
-To start the initial setup, navigate to https://yourapp.mydomain.com/if/flow/initial-setup/.
+To start the initial setup, navigate to https://yourapp.mydomain.com/if/flow/initial-setup/
+
+
+### Using PocketID for the first time
+To initiate Pocket ID setup, navigate to https://yourapp.mydomain.com/login/setup
 
 ---
 
@@ -151,13 +155,35 @@ To start the initial setup, navigate to https://yourapp.mydomain.com/if/flow/ini
 
    * Example for Authelia:
 
-     ```yaml
-     - id: authelia
-       name: Authelia
-       type: forwardAuth
-       config:
-         address: https://authelia.mydomain.com/api/verify
+     ```json
+      {
+      "address": "https://authelia.yourdomain.com/api/verify?rd=https://authelia.yourdomain.com",
+      "authResponseHeaders": [
+         "Remote-User",
+         "Remote-Groups",
+         "Remote-Name",
+         "Remote-Email"
+      ],
+      "trustForwardHeader": true
+      }
      ```
+
+   * Example for Authentik:
+
+     ```json
+      {
+      "address": "http://authentik-proxy:9000/outpost.goauthentik.io/auth/traefik",
+      "authResponseHeaders": [
+         "X-authentik-username",
+         "X-authentik-groups",
+         "X-authentik-email",
+         "X-authentik-name",
+         "X-authentik-uid"
+      ],
+      "trustForwardHeader": true
+      }
+     ```
+
 4. Go to **Dashboard > Manage** on the resource you want to protect
 5. Click **Add Middleware**
 6. Select your new external middleware (e.g., Authelia or Authentik)

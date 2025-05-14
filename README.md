@@ -103,7 +103,7 @@ Since you're deploying Authentik on a separate host from your application server
    docker compose up -d authentik-proxy
    ```
 
-4. **Configure your middleware to use the remote auth server** instead of the local service and this will be picked up and proxied to your auth server.
+4. **Configure your middleware to use the local auth server** instead of the remote service and this will be picked up and proxied to your auth server.
 
 This setup allows your application server to communicate with your external Authentik instance through the local proxy.
 
