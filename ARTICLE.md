@@ -143,6 +143,79 @@ To start the initial setup, navigate to https://yourapp.mydomain.com/if/flow/ini
 
 ---
 
+## 🔄 Step 8: Integrate with Middleware Manager
+
+1. Open the Pangolin Middleware Manager
+2. Go to **Middlewares** tab
+3. Ensure your `Authelia` or `Authentik` middleware is listed and correctly configured
+
+   * Example for Authelia:
+
+     ```yaml
+     - id: authelia
+       name: Authelia
+       type: forwardAuth
+       config:
+         address: https://authelia.mydomain.com/api/verify
+     ```
+4. Go to **Dashboard > Manage** on the resource you want to protect
+5. Click **Add Middleware**
+6. Select your new external middleware (e.g., Authelia or Authentik)
+7. Save and test
+
+> 📸 Screenshot suggestion: Show attaching the middleware in the Middleware Manager UI.
+
+### 🔐 Special Setup for Authentik on a Separate Host
+
+Since you've deployed Authentik on a separate host from your application servers, you'll need to set up an Authentik Outpost:
+
+1. **Create a new Outpost in Authentik**:
+   - Go to your Authentik admin interface
+   - Navigate to **Outposts** and create a new Proxy Outpost
+   - Click **View** on the new outpost and copy the token
+
+2. **Add the Authentik Proxy to your application server's docker-compose.yml**:
+
+   ```yaml
+   authentik-proxy:
+     image: ghcr.io/goauthentik/proxy
+     container_name: authentik-proxy
+     ports:
+       - 9000:9000
+       - 9443:9443
+     environment:
+       AUTHENTIK_HOST: https://authentik.yourdomain.com
+       AUTHENTIK_INSECURE: "false"
+       AUTHENTIK_TOKEN: REPLACE_WITH_YOUR_TOKEN
+       # Optional: Set this if your internal communication URL differs from the public URL
+       # AUTHENTIK_HOST_BROWSER: https://external-domain.tld
+     labels:
+       traefik.enable: true
+       traefik.port: 9000
+       traefik.http.routers.authentik.rule: Host(`authentik.yourdomain.com`) && PathPrefix(`/outpost.goauthentik.io/`)
+       traefik.http.middlewares.authentik.forwardauth.address: http://authentik-proxy:9000/outpost.goauthentik.io/auth/traefik
+       traefik.http.middlewares.authentik.forwardauth.trustForwardHeader: true
+       traefik.http.middlewares.authentik.forwardauth.authResponseHeaders: X-authentik-username,X-authentik-groups,X-authentik-entitlements,X-authentik-email,X-authentik-name,X-authentik-uid,X-authentik-jwt,X-authentik-meta-jwks,X-authentik-meta-outpost,X-authentik-meta-provider,X-authentik-meta-app,X-authentik-meta-version
+   ```
+
+3. **Start the Authentik Proxy**:
+   ```bash
+   docker compose up -d authentik-proxy
+   ```
+
+4. **Configure your middleware in Pangolin** to use the local proxy:
+   ```yaml
+   - id: authentik
+     name: Authentik
+     type: forwardAuth
+     config:
+       address: http://authentik-proxy:9000/outpost.goauthentik.io/auth/traefik
+   ```
+
+This setup allows your application server to communicate with your external Authentik instance through the local proxy.
+
+---
+
 ## 📌 Summary
 
 With just a few inputs and one command, the CloudFormation Template Customizer sets up ready-to-deploy authentication servers tailored to your environment. It’s perfect for securely testing external authentication flows with Pangolin and its Middleware Manager.
