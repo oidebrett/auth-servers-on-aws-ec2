@@ -146,6 +146,17 @@ To start the initial setup, navigate to https://yourapp.mydomain.com/if/flow/ini
 ### Using PocketID for the first time
 To initiate Pocket ID setup, navigate to https://yourapp.mydomain.com/login/setup
 
+### Using Zitadel for the first time
+To start the initial setup, navigate to https://yourapp.mydomain.com/
+
+Login with the default credentials:
+Username: root@yourdomain.com
+Password: RootPassword1!
+
+Change the password and (email if required)
+
+**Please Note**, you should definitely follow the initialize steps for your authentication server as leaving in un-initialized state is not recommended.
+
 ---
 
 ## 🔄 Step 8: Integrate with Middleware Manager

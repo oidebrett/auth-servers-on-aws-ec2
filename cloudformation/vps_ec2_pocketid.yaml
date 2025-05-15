@@ -187,8 +187,6 @@ Resources:
           
           # Create docker-compose.yml file with Traefik and PocketID using labels
           cat > /home/ubuntu/docker-compose.yml << 'EOF'
-          version: '3'
-
           services:
             traefik:
               image: traefik:v3.4.0

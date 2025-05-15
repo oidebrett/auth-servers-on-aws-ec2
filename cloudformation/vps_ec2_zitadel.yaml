@@ -187,28 +187,68 @@ Resources:
               apt-get install -y openssl
           fi
 
+          # Create directory structure
+          mkdir -p /home/ubuntu/config/zitadel
+          mkdir -p /home/ubuntu/traefik/letsencrypt
+          mkdir -p /home/ubuntu/machinekey
+          
           # Generate random passwords
           POSTGRES_PASSWORD=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
-          ZITADEL_SECRET_KEY=$(openssl rand -base64 64 | tr -dc 'a-zA-Z0-9' | fold -w 64 | head -n 1)
-
+          ZITADEL_MASTERKEY=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
+          
           # Create .env file
           cat > /home/ubuntu/.env << EOF
           POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-          POSTGRES_USER=admin
-          POSTGRES_DB=zitadel-db
-          ZITADEL_SECRET_KEY=${ZITADEL_SECRET_KEY}
+          POSTGRES_USER=zitadel
+          POSTGRES_DB=zitadel
+          ZITADEL_MASTERKEY=${ZITADEL_MASTERKEY}
+          ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME=root@yourdomain.com
+          ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD=RootPassword1!
           EOF
-
+          
           # Set proper ownership
           chown ubuntu:ubuntu /home/ubuntu/.env
           chmod 600 /home/ubuntu/.env
-
+          
           echo ".env file created successfully at $(date)!"
-
+          
+          # Create zitadel.yaml configuration file
+          cat > /home/ubuntu/config/zitadel/zitadel.yaml << EOF
+          Log:
+            Level: 'info'
+          
+          ExternalSecure: true
+          ExternalDomain: 'auth.yourdomain.com'
+          ExternalPort: 443
+          
+          SystemDefaults:
+            KeyConfig:
+              PrivateKeyLifetime: 8760h
+              PublicKeyLifetime: 1080h
+          
+          Database:
+            postgres:
+              Host: postgresql
+              Port: 5432
+              Database: zitadel
+              MaxOpenConns: 25
+              MaxConnLifetime: 1h
+              MaxConnIdleTime: 5m
+              Options:
+              User:
+                Username: zitadel
+                Password: ${POSTGRES_PASSWORD}
+                SSL:
+                  Mode: disable
+              Admin:
+                Username: zitadel
+                Password: ${POSTGRES_PASSWORD}
+                SSL:
+                  Mode: disable
+          EOF
+          
           # Create docker-compose.yml file
           cat > /home/ubuntu/docker-compose.yml << 'EOF'
-          version: '3.9'
-
           services:
             traefik:
               image: traefik:v3.4
@@ -218,10 +258,13 @@ Resources:
                 - "80:80"
                 - "443:443"
               command:
+                - "--log.level=DEBUG"
                 - "--api.insecure=false"
                 - "--providers.docker=true"
                 - "--providers.docker.exposedbydefault=false"
                 - "--entrypoints.web.address=:80"
+                - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+                - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
                 - "--entrypoints.websecure.address=:443"
                 - "--certificatesresolvers.myresolver.acme.httpchallenge=true"
                 - "--certificatesresolvers.myresolver.acme.httpchallenge.entrypoint=web"
@@ -230,10 +273,12 @@ Resources:
               volumes:
                 - /var/run/docker.sock:/var/run/docker.sock:ro
                 - ./traefik/letsencrypt:/letsencrypt
-
+              networks:
+                - proxy
+          
             postgresql:
               image: postgres:16-alpine
-              container_name: zitadel-postgresql
+              container_name: postgresql
               restart: unless-stopped
               environment:
                 POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -241,21 +286,32 @@ Resources:
                 POSTGRES_DB: ${POSTGRES_DB}
               volumes:
                 - pgdata:/var/lib/postgresql/data
-
+              healthcheck:
+                test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+                interval: 5s
+                timeout: 5s
+                retries: 5
+              networks:
+                - zitadel
+          
             zitadel:
               image: ghcr.io/zitadel/zitadel:latest
               container_name: zitadel
               restart: unless-stopped
+              command: >
+                start-from-init
+                --masterkey "${ZITADEL_MASTERKEY}"
+                --tlsMode external
+                --config /config/zitadel.yaml
               environment:
-                - ZITADEL_DATABASE_POSTGRES_HOST=postgresql
-                - ZITADEL_DATABASE_POSTGRES_PORT=5432
-                - ZITADEL_DATABASE_POSTGRES_USER=${POSTGRES_USER}
-                - ZITADEL_DATABASE_POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-                - ZITADEL_DATABASE_POSTGRES_DATABASE=${POSTGRES_DB}
-                - ZITADEL_TLS_MODE=external
-                - ZITADEL_EXTERNAL_DOMAIN=auth.yourdomain.com
-                - ZITADEL_EXTERNAL_PORT=443
-                - ZITADEL_EXTERNAL_SECURE=true
+                - ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME=${ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME}
+                - ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD=${ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD}
+              volumes:
+                - ./config/zitadel:/config
+                - ./machinekey:/machinekey
+              depends_on:
+                postgresql:
+                  condition: service_healthy
               labels:
                 - "traefik.enable=true"
                 - "traefik.http.routers.zitadel.rule=Host(`auth.yourdomain.com`)"
@@ -263,20 +319,30 @@ Resources:
                 - "traefik.http.routers.zitadel.tls=true"
                 - "traefik.http.routers.zitadel.tls.certresolver=myresolver"
                 - "traefik.http.services.zitadel.loadbalancer.server.port=8080"
-              depends_on:
-                - postgresql
-
+                - "traefik.http.services.zitadel.loadbalancer.server.scheme=h2c"
+                - "traefik.http.middlewares.zitadel-https-redirect.redirectscheme.scheme=https"
+                - "traefik.http.middlewares.zitadel-https-redirect.redirectscheme.permanent=true"
+                - "traefik.http.routers.zitadel-http.rule=Host(`auth.yourdomain.com`)"
+                - "traefik.http.routers.zitadel-http.entrypoints=web"
+                - "traefik.http.routers.zitadel-http.middlewares=zitadel-https-redirect"
+              networks:
+                - proxy
+                - zitadel
+          
           volumes:
             pgdata:
+          
+          networks:
+            proxy:
+            zitadel:
           EOF
-
+          
           # Set proper ownership
           chown ubuntu:ubuntu /home/ubuntu/docker-compose.yml
-
-          # Create required directories
-          mkdir -p /home/ubuntu/traefik/letsencrypt
+          chown -R ubuntu:ubuntu /home/ubuntu/config
           chown -R ubuntu:ubuntu /home/ubuntu/traefik
-
+          chown -R ubuntu:ubuntu /home/ubuntu/machinekey
+          
           echo "ZITADEL configuration completed successfully at $(date)!"
 
       Tags:

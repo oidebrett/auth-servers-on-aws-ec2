@@ -108,6 +108,30 @@ Since you're deploying Authentik on a separate host from your application server
 
 This setup allows your application server to communicate with your external Authentik instance through the local proxy.
 
+## Zitadel Configuration Notes
+
+When using the Zitadel template:
+
+1. Default admin credentials are set through environment variables:
+   - Username: root@yourdomain.com (customized by the script)
+   - Password: RootPassword1!
+
+2. The PostgreSQL database is configured with:
+   - A randomly generated secure password
+   - Health checks to ensure it's ready before Zitadel starts
+   - Proper volume mounting for data persistence
+
+3. Traefik is configured to:
+   - Handle HTTPS traffic with automatic Let's Encrypt certificates
+   - Route traffic to Zitadel using the HTTP/2 protocol (h2c)
+
+4. For security, change the default password immediately after first login.
+
+5. If you encounter any issues with Zitadel startup, check the logs with:
+   ```bash
+   docker logs zitadel
+   ```
+
 ## Future Additions
 
 More authentication server templates will be added in the future. Contributions are welcome!
