@@ -17,6 +17,7 @@ To simplify the process, a shell script is included that automatically customize
 - **Authelia** – `vps_ec2_authelia.yaml`
 - **Authentik** – `vps_ec2_authentik.yaml`
 - **PocketID** – `vps_ec2_pocketid.yaml`
+- **Zitadel** – `vps_ec2_zitadel.yaml`
 - **Base Docker VPS (no auth stack)** – `vps_ec2_base_docker.yaml`
 
 ---

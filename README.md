@@ -8,6 +8,7 @@ This repository contains AWS CloudFormation templates for quickly deploying temp
 - **vps_ec2_authentik.yaml**: Authentik authentication server
 - **vps_ec2_authelia.yaml**: Authelia authentication server
 - **vps_ec2_pocketid.yaml**: PocketID authentication server
+- **vps_ec2_zitadel.yaml**: Zitadel authentication server
 
 ## Purpose
 
